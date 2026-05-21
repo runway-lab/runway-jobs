@@ -146,6 +146,12 @@ auto-merge once the `validate` check passes. This relies on three pieces:
    `gh pr merge --auto --squash`. `--auto` queues; GitHub merges as soon as
    the required check is green.
 
+4. **`allow_auto_merge` must be enabled on the repo** — `--auto` is a
+   no-op (and errors) otherwise:
+   ```bash
+   gh api -X PATCH repos/runway-lab/runway-jobs -f allow_auto_merge=true
+   ```
+
 ### Trust model after auto-merge
 
 | Path | Gate |
