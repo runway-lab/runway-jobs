@@ -1,0 +1,22 @@
+apiVersion: runway/v1alpha1
+kind: Experiment
+metadata:
+  name: auto-merge-test
+  owner: jurray-jiajun
+spec:
+  code:
+    repo: runway-lab/example-project
+    ref: main
+  resources:
+    gpus: 1
+    gpu_type: any
+    max_hours: 1
+  backends:
+    - gcp
+  selection:
+    policy: eta
+    profile_seconds: 60
+  run: |
+    python smoke.py
+  artifacts:
+    uri: gs://${ARTIFACTS_BUCKET}/runs/{run_id}/candidates/{backend_id}/
