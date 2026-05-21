@@ -11,11 +11,14 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
   gate:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.scope.outputs.ok }}
     steps:
       - name: Check that diff is jobs/-only
         env:
@@ -49,3 +52,98 @@ jobs:
           # policy` check + any CODEOWNERS approvals (there are none for
           # jobs/) before actually merging.
           gh pr merge "$PR" --repo "$REPO" --squash --auto --delete-branch
+
+  open-issue:
+    # Open the tracking issue at PR-open time (not on merge): pushes from
+    # auto-merge use GITHUB_TOKEN and don't trigger downstream workflows
+    # (anti-loop). Idempotent — checks if an issue with this run_id
+    # already exists before creating a new one.
+    needs: gate
+    if: needs.gate.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Open issue per newly-added spec
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          added=$(gh api "repos/$REPO/pulls/$PR/files" \
+            --paginate \
+            --jq '.[] | select(.status == "added" and (.filename | startswith("jobs/")) and (.filename | endswith(".yaml"))) | .filename')
+
+          if [ -z "$added" ]; then
+            echo "No newly-added jobs/*.yaml in PR; skipping."
+            exit 0
+          fi
+
+          python3 -m pip install --quiet pyyaml
+
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            run_id=$(basename "$path" .yaml)
+            echo "::group::run_id=$run_id"
+
+            # Idempotency: skip if an issue with this run_id label already
+            # exists (re-runs on synchronize, etc).
+            existing=$(gh issue list --repo "$REPO" --search "$run_id in:title" --json number --jq '.[0].number // empty')
+            if [ -n "$existing" ]; then
+              echo "Issue #$existing already exists for $run_id; skipping."
+              echo "::endgroup::"
+              continue
+            fi
+
+            python3 - "$path" "$run_id" <<'PY'
+          import os, pathlib, subprocess, sys
+          import yaml
+
+          path = pathlib.Path(sys.argv[1])
+          run_id = sys.argv[2]
+          repo = os.environ["REPO"]
+          sha = os.environ["HEAD_SHA"]
+
+          spec = yaml.safe_load(path.read_text())
+          md = spec["metadata"]
+          sp = spec["spec"]
+          backends = sp["backends"]
+          owner = md["owner"]
+
+          title = f"[run] {md['name']} — {run_id}"
+          spec_url = f"https://github.com/{repo}/blob/{sha}/{path}"
+          body = "\n".join([
+              f"**Run ID:** `{run_id}`",
+              f"**Owner:** @{owner}",
+              f"**Spec:** [{path}]({spec_url}) (at `{sha[:8]}`)",
+              f"**Resources:** {sp['resources']['gpus']}× {sp['resources']['gpu_type']}, max {sp['resources']['max_hours']}h",
+              f"**Backends:** {', '.join(backends)}",
+              f"**Selection:** {sp['selection']['policy']} (profile {sp['selection']['profile_seconds']}s)",
+              "",
+              "Agents will post their live status as comments below.",
+              "Opened by `.github/workflows/auto-merge-jobs.yml` (open-issue job).",
+          ])
+
+          labels = ["run", "status:running"] + [f"backend:{b}" for b in backends]
+          for lab in labels:
+              subprocess.run(
+                  ["gh", "label", "create", lab, "--repo", repo, "--force"],
+                  capture_output=True,
+              )
+
+          subprocess.run(
+              ["gh", "issue", "create", "--repo", repo,
+               "--title", title, "--body", body,
+               "--label", ",".join(labels)],
+              check=True,
+          )
+          PY
+
+            echo "::endgroup::"
+          done <<< "$added"
