@@ -1,0 +1,51 @@
+name: auto-merge jobs/
+
+# Uses pull_request_target so workflow code is loaded from the *base* ref
+# (trusted), not from the PR. We must NEVER run scripts/tools from the PR
+# in this workflow — only read its file list and let GitHub's --auto
+# wait for the separate `validate` required check to gate the merge.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  gate:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that diff is jobs/-only
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          paths=$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path')
+          echo "Changed paths:"
+          printf '  %s\n' $paths
+          if printf '%s\n' $paths | grep -v '^jobs/' | grep -q .; then
+            echo "::notice::PR touches paths outside jobs/; skipping auto-merge (a human must review)."
+            exit 0
+          fi
+          if [ -z "$paths" ]; then
+            echo "::warning::PR has no changed files; skipping auto-merge."
+            exit 0
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+        id: scope
+
+      - name: Enable auto-merge
+        if: steps.scope.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # --auto queues the merge; GitHub waits for the required `schema +
+          # policy` check + any CODEOWNERS approvals (there are none for
+          # jobs/) before actually merging.
+          gh pr merge "$PR" --repo "$REPO" --squash --auto --delete-branch

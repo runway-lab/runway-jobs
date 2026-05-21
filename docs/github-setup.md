@@ -42,7 +42,7 @@ cat <<'JSON' | gh api -X PUT repos/runway-lab/runway-jobs/branches/main/protecti
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
-    "required_approving_review_count": 1,
+    "required_approving_review_count": 0,
     "require_code_owner_reviews": true,
     "dismiss_stale_reviews": true
   },
@@ -62,9 +62,12 @@ Settings, in plain English:
 
 - Require PRs into `main` (no direct push).
 - Require the `schema + policy` status check (from `.github/workflows/validate.yml`).
-- Require 1 review.
-- Require CODEOWNERS to be among the reviewers (so `policies/`, `schemas/`,
-  `scripts/`, `.github/` changes need an admin specifically).
+- `required_approving_review_count: 0` — no human review needed for paths
+  with no CODEOWNER (currently `jobs/`). See section 6 for the auto-merge
+  setup that makes this safe.
+- `require_code_owner_reviews: true` — CODEOWNED paths (`policies/`,
+  `schemas/`, `scripts/`, `.github/`, `tests/`, `CODEOWNERS`) still need
+  an admin approval.
 - Dismiss stale reviews on new commits.
 - No force pushes, no deletions, linear history.
 - `enforce_admins: false` — admins can use `gh pr merge --admin` to bypass
@@ -122,7 +125,42 @@ gh api -X POST repos/runway-lab/runway-jobs/branches/main/protection/required_si
   -H "Accept: application/vnd.github+json"
 ```
 
-## 6. Agent identity
+## 6. Auto-merge for `jobs/` PRs
+
+To avoid admin click-through on every intern submission, `jobs/`-only PRs
+auto-merge once the `validate` check passes. This relies on three pieces:
+
+1. `CODEOWNERS` does **not** list `/jobs/`. Combined with branch
+   protection's `required_approving_review_count = 0` +
+   `require_code_owner_reviews = true`, that means:
+   - PRs touching only `/jobs/` need no human approval.
+   - PRs touching `/policies/`, `/schemas/`, `/scripts/`, `/.github/`,
+     `/tests/`, or `/CODEOWNERS` still need an admin (CODEOWNER) approval.
+
+2. `.github/workflows/validate.yml` is the required status check. It runs
+   the validator (schema + 11 policy rules + 27 pytest tests). A failing
+   validator blocks merge.
+
+3. `.github/workflows/auto-merge-jobs.yml` runs on `pull_request_target`,
+   verifies the diff is `jobs/`-only, and calls
+   `gh pr merge --auto --squash`. `--auto` queues; GitHub merges as soon as
+   the required check is green.
+
+### Trust model after auto-merge
+
+| Path | Gate |
+|------|------|
+| `jobs/*` only | validator (CI) — no human |
+| anything else | admin approval via CODEOWNERS |
+
+The validator is now the **only code-layer gate** for job specs. The
+agent's local re-validation (using its checked-in copy of `policies/`)
+remains the runtime safety net. If a malicious spec passes the validator,
+it will also pass the agent's same check — tightening
+`forbidden_substrings` / `forbidden_string_regex` (and ideally adding a
+`run:` format whitelist later) is how we harden over time.
+
+## 7. Agent identity
 
 Create a GitHub App `runway-agent` with the minimum scopes:
 
@@ -135,7 +173,7 @@ Create a GitHub App `runway-agent` with the minimum scopes:
 Install the App on `runway-lab/runway-jobs` only. Each agent host gets its own
 installation token; no shared PAT.
 
-## 7. Verifying the gate
+## 8. Verifying the gate
 
 After everything is applied, the following must all be true:
 

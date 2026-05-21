@@ -1,8 +1,13 @@
 # Policy and workflow changes require admin review.
-/.github/ @runway-lab/runway-admins
+/.github/  @runway-lab/runway-admins
 /policies/ @runway-lab/runway-admins
-/schemas/ @runway-lab/runway-admins
-/scripts/ @runway-lab/runway-admins
+/schemas/  @runway-lab/runway-admins
+/scripts/  @runway-lab/runway-admins
+/tests/    @runway-lab/runway-admins
+/CODEOWNERS @runway-lab/runway-admins
 
-# Job submissions require reviewer/admin review.
-/jobs/ @runway-lab/runway-reviewers @runway-lab/runway-admins
+# Job submissions (/jobs/) have NO codeowner on purpose: with
+# require_code_owner_reviews=true + required_approving_review_count=0,
+# this means jobs/-only PRs need no human approval. The validate workflow
+# (required status check) + the auto-merge-jobs workflow gate them
+# instead. See docs/github-setup.md.
