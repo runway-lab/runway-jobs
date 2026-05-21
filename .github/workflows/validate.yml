@@ -22,7 +22,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: python -m pip install --upgrade pip pyyaml jsonschema
+        run: python -m pip install --upgrade pip pyyaml jsonschema pytest
+
+      - name: Run validator unit tests
+        run: python -m pytest tests/ -q
 
       - name: Validate job specs
         run: python scripts/validate_jobs.py
