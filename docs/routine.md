@@ -146,6 +146,12 @@ The validator (running on every PR) checks against `policies/default.yaml`:
 If validation fails, the PR shows the error in the `schema + policy`
 check. Fix and push another commit — the same PR re-validates.
 
+CI also enforces **per-file ownership** on modifications and deletions:
+you can only modify, delete, or rename `jobs/<run_id>.yaml` files
+*you* originally created. Trying to touch someone else's spec — even
+to rewrite its `owner` to your own login — gets rejected. New specs
+(adds) are governed by the `metadata.owner == PR author` rule above.
+
 ## Things to keep in mind
 
 - **Pin commit SHAs, not `main`**. Otherwise reproducing a result later
