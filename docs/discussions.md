@@ -176,7 +176,7 @@ Never let multiple candidates write to the same checkpoint or result directory.
 
 ## GitHub Control Plane
 
-The initial control plane is a GitHub organization and private repository:
+The initial control plane is a GitHub organization and repository:
 
 - Org: `runway-lab`
 - Repo: `runway-lab/runway-jobs`
@@ -186,7 +186,7 @@ Initial repository structure:
 
 ```text
 jobs/              # submitted job specs
-policies/          # limits and allowed backends/repos/images
+policies/          # limits, placeholder allowlist, leak patterns
 schemas/           # JSON schema for job specs
 scripts/           # validation helpers
 .github/workflows/ # validation workflow
@@ -202,34 +202,72 @@ runway-interns
 runway-agents
 ```
 
-Current GitHub Free private repository limitation:
+### Decision: public repo, GitHub-enforced gate
 
-- Branch protection is not available on private repos without GitHub Pro/Team.
-- Therefore CODEOWNERS and required checks cannot be enforced at the GitHub
-  branch level.
+GitHub Free only ships branch protection for **public** repositories. The
+earlier draft tried to compensate by pushing all approval logic into the
+agent (`/rwy approve` comment + agent-side approver verification), which put
+the trust root on every agent host.
 
-MVP workaround:
+Switching `runway-jobs` to public is safe because the registry never holds
+secrets, internal hostnames, bucket names, or dataset paths — those go
+through `${PLACEHOLDER}` substitution at the agent. Public unlocks:
 
-- Agents must enforce approval themselves.
-- Do not run every file on `main`.
-- Run only jobs with an explicit approval marker/comment from an authorized
-  reviewer/admin.
-- Agent must re-run validation locally before execution.
+- Branch protection on `main` (no force push, no deletion, linear history).
+- Required PR reviews + CODEOWNERS enforcement.
+- Required status check from the `validate` workflow.
+- Optional required signed commits.
 
-Recommended Free-plan MVP flow:
+The trust root collapses from "every agent host" to "GitHub branch
+protection + admin team". One-time admin setup steps live in
+`docs/github-setup.md`.
+
+### Updated flow
 
 ```text
-intern opens issue or PR with job YAML
-GitHub Action validates schema/policy
-reviewer/admin comments /rwy approve
-agent checks:
-  - approver is in runway-reviewers or runway-admins
-  - validation passed
-  - files/spec are within allowed scope
-  - job policy passes locally
-agent executes approved candidate
-agent writes status back to GitHub
+intern (not a collaborator) forks → PR with jobs/<run_id>.yaml
+GitHub Actions `validate` runs schema + policy lint  [REQUIRED status check]
+CODEOWNERS routes review:
+  - jobs/                      → runway-reviewers or runway-admins
+  - policies/ schemas/ scripts/ .github/ → runway-admins only
+reviewer approves; PR merges to main
+rwy-agent (per backend host) polls main:
+  - fetch a specific commit SHA (not refs/heads/main)
+  - re-run policy lint locally against its own copy
+  - resolve ${VAR} placeholders from local config
+  - execute
+  - write status back as commit status / PR comment
 ```
+
+There is no `/rwy approve` comment flow. Merging to `main` *is* the
+approval, enforced by GitHub.
+
+### Policy layer (what the validator enforces)
+
+- `limits`: GPU count, max hours, max profile seconds.
+- `allowed_backends`, `allowed_gpu_types`, `allowed_repo_prefixes`.
+- `allowed_placeholders`: every `${VAR}` in any string field must be
+  declared. Stops accidental injection of unknown agent-side variables.
+- `allowed_artifact_uri_prefixes`: artifact URIs must start with one of
+  these (placeholders allowed inside the prefix). Prevents
+  hard-coded bucket names from landing in the public repo.
+- `forbidden_substrings` + `forbidden_string_regex`: scanned against
+  **every** string in the spec (not just `run`). Blocks well-known
+  credential lookups, metadata endpoints, internal IP ranges, and
+  `.corp` / `.internal` / `.intra` hostnames.
+
+### Defense-in-depth on the agent
+
+Even with GitHub enforcing the gate, the agent still:
+
+- Pulls a specific commit SHA, not `refs/heads/main`, to avoid TOCTOU
+  between approval and fetch.
+- Re-runs the validator from a checked-in copy of `policies/` (does not
+  trust the policy file fetched alongside the job).
+- Uses a per-host GitHub App installation token scoped to
+  `contents:read` + `statuses:write` + `pull_requests:write`. No shared
+  PAT.
+- Refuses any change that touches files outside `jobs/`.
 
 ## Security Rules
 
@@ -282,13 +320,19 @@ Real infra canaries should run in this order:
 
 ## Immediate Next Steps
 
-1. Decide whether MVP submission uses issues or PRs.
-2. Build `rwy` CLI and `rwy-agent`.
-3. Implement GitHub polling/status adapter.
-4. Implement fake backend adapter and tests.
-5. Add GCP backend using SkyPilot.
-6. Add Slurm backend using `sbatch`/`squeue`/`scancel`.
-7. Add SSH backend using `nvidia-smi` polling and `flock`.
-8. Define artifact storage and run ID conventions.
-9. Define progress metric format for ETA.
-10. Decide whether to upgrade GitHub plan for branch protection later.
+1. ~~Decide whether MVP submission uses issues or PRs.~~ — PRs (fork-based)
+   so that merge gates approval via branch protection.
+2. ~~Decide whether to upgrade GitHub plan for branch protection later.~~ —
+   resolved by making the repo public; no plan upgrade needed.
+3. Apply the one-time admin steps in `docs/github-setup.md` (visibility,
+   team permissions, branch protection, signed commits, GitHub App).
+4. Build `rwy` CLI and `rwy-agent`.
+5. Implement GitHub polling/status adapter using a GitHub App installation
+   token, pulling a specific commit SHA from `main`.
+6. Implement fake backend adapter and tests.
+7. Add GCP backend using SkyPilot.
+8. Add Slurm backend using `sbatch`/`squeue`/`scancel`.
+9. Add SSH backend using `nvidia-smi` polling and `flock`.
+10. Define artifact storage and run ID conventions (placeholders already in
+    place: `${ARTIFACTS_BUCKET}` + `{run_id}` + `{backend_id}`).
+11. Define progress metric format for ETA.

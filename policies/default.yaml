@@ -18,10 +18,38 @@ allowed_gpu_types:
 allowed_repo_prefixes:
   - runway-lab/
 
-forbidden_run_patterns:
+# Placeholders the agent will resolve from its local config before execution.
+# Any ${VAR} that appears in a spec must be listed here.
+allowed_placeholders:
+  - ARTIFACTS_BUCKET
+  - SLURM_PARTITION
+  - GCP_PROJECT
+
+# Artifact URIs must start with one of these prefixes. Placeholders are
+# allowed in the prefix itself so the bucket name never has to appear in the
+# public repo.
+allowed_artifact_uri_prefixes:
+  - "gs://${ARTIFACTS_BUCKET}/"
+  - "s3://${ARTIFACTS_BUCKET}/"
+
+# Literal substrings (case-insensitive) that must not appear in any string
+# field of a spec. Use this for well-known credential/metadata lookups.
+forbidden_substrings:
   - "cat ~/.ssh"
   - "gcloud auth"
   - "aws configure"
   - "printenv"
-  - "env |"
-  - "curl .*169.254.169.254"
+  - "env | "
+  - "169.254.169.254"
+  - "metadata.google.internal"
+  - "/mnt/lab/"
+  - "/data/internal/"
+
+# Real regex patterns. Use this for things like internal IP ranges and
+# *.corp / *.internal hostnames that shouldn't leak into a public spec.
+forbidden_string_regex:
+  - "\\.corp\\."
+  - "\\.internal(\\b|/)"
+  - "\\.intra(\\b|/)"
+  - "\\b10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b"
+  - "\\b192\\.168\\.\\d{1,3}\\.\\d{1,3}\\b"

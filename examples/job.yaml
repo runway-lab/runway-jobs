@@ -20,4 +20,6 @@ spec:
   run: |
     python train.py --config configs/smoke.yaml
   artifacts:
-    uri: gs://replace-me/runs/{run_id}/candidates/{backend_id}/
+    # ${ARTIFACTS_BUCKET} is resolved by the agent at execution time using
+    # its local config; the bucket name never appears in this public repo.
+    uri: gs://${ARTIFACTS_BUCKET}/runs/{run_id}/candidates/{backend_id}/

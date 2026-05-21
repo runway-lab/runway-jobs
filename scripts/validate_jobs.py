@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
+import argparse
 import pathlib
 import re
 import sys
-from typing import Any
+from typing import Any, Iterable
 
 import jsonschema
 import yaml
@@ -14,8 +15,15 @@ import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 JOBS_DIR = ROOT / "jobs"
+EXAMPLES_DIR = ROOT / "examples"
 POLICY_PATH = ROOT / "policies" / "default.yaml"
 SCHEMA_PATH = ROOT / "schemas" / "job.schema.json"
+
+# Placeholders the agent resolves at execution time (run_id / backend_id).
+# These are NOT validated against allowed_placeholders.
+RUNTIME_PLACEHOLDERS = {"run_id", "backend_id"}
+RUNTIME_PLACEHOLDER_RE = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
+AGENT_PLACEHOLDER_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 
 
 def load_yaml(path: pathlib.Path) -> dict[str, Any]:
@@ -31,7 +39,98 @@ def load_schema(path: pathlib.Path) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def validate_policy(path: pathlib.Path, job: dict[str, Any], policy: dict[str, Any]) -> list[str]:
+def iter_strings(value: Any, path: str = "") -> Iterable[tuple[str, str]]:
+    """Yield (json-path, string) for every string leaf in `value`."""
+    if isinstance(value, str):
+        yield path or "<root>", value
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else key
+            yield from iter_strings(child, child_path)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from iter_strings(child, f"{path}[{index}]")
+
+
+def validate_placeholders(
+    job: dict[str, Any], allowed: set[str]
+) -> list[str]:
+    errors: list[str] = []
+    for field_path, value in iter_strings(job):
+        for match in AGENT_PLACEHOLDER_RE.finditer(value):
+            name = match.group(1)
+            if name not in allowed:
+                errors.append(
+                    f"{field_path}: placeholder ${{{name}}} is not in "
+                    f"allowed_placeholders"
+                )
+    return errors
+
+
+def validate_forbidden_substrings(
+    job: dict[str, Any], substrings: list[str]
+) -> list[str]:
+    errors: list[str] = []
+    lowered = [s.lower() for s in substrings]
+    for field_path, value in iter_strings(job):
+        haystack = value.lower()
+        for raw, needle in zip(substrings, lowered):
+            if needle and needle in haystack:
+                errors.append(
+                    f"{field_path}: contains forbidden substring {raw!r}"
+                )
+    return errors
+
+
+def validate_forbidden_regex(
+    job: dict[str, Any], patterns: list[str]
+) -> list[str]:
+    errors: list[str] = []
+    compiled = [(p, re.compile(p)) for p in patterns]
+    for field_path, value in iter_strings(job):
+        for raw, regex in compiled:
+            if regex.search(value):
+                errors.append(
+                    f"{field_path}: matches forbidden pattern {raw!r}"
+                )
+    return errors
+
+
+def validate_artifact_uri(
+    job: dict[str, Any], allowed_prefixes: list[str]
+) -> list[str]:
+    uri = job["spec"]["artifacts"]["uri"]
+    if not allowed_prefixes:
+        return []
+    if not any(uri.startswith(prefix) for prefix in allowed_prefixes):
+        return [
+            f"spec.artifacts.uri={uri!r} does not start with any "
+            f"allowed_artifact_uri_prefixes entry"
+        ]
+    return []
+
+
+def validate_runtime_placeholders(job: dict[str, Any]) -> list[str]:
+    uri = job["spec"]["artifacts"]["uri"]
+    found = set(RUNTIME_PLACEHOLDER_RE.findall(uri))
+    missing = RUNTIME_PLACEHOLDERS - found
+    if missing:
+        return [
+            "spec.artifacts.uri must include "
+            + " and ".join(f"{{{p}}}" for p in sorted(RUNTIME_PLACEHOLDERS))
+        ]
+    unknown = found - RUNTIME_PLACEHOLDERS
+    if unknown:
+        return [
+            f"spec.artifacts.uri has unknown runtime placeholders: "
+            f"{sorted(unknown)}"
+        ]
+    return []
+
+
+def validate_policy(
+    path: pathlib.Path, job: dict[str, Any], policy: dict[str, Any]
+) -> list[str]:
     errors: list[str] = []
     spec = job["spec"]
     resources = spec["resources"]
@@ -52,53 +151,87 @@ def validate_policy(path: pathlib.Path, job: dict[str, Any], policy: dict[str, A
 
     if selection["profile_seconds"] > limits.get("max_profile_seconds", 0):
         errors.append(
-            f"selection.profile_seconds={selection['profile_seconds']} exceeds "
-            f"max_profile_seconds={limits.get('max_profile_seconds')}"
+            f"selection.profile_seconds={selection['profile_seconds']} "
+            f"exceeds max_profile_seconds={limits.get('max_profile_seconds')}"
         )
 
     allowed_backends = set(policy.get("allowed_backends", []))
     unknown_backends = sorted(set(spec["backends"]) - allowed_backends)
     if unknown_backends:
-        errors.append(f"backends contains unsupported values: {unknown_backends}")
+        errors.append(
+            f"backends contains unsupported values: {unknown_backends}"
+        )
 
     allowed_gpu_types = set(policy.get("allowed_gpu_types", []))
     if resources["gpu_type"] not in allowed_gpu_types:
-        errors.append(f"resources.gpu_type={resources['gpu_type']!r} is not allowed")
+        errors.append(
+            f"resources.gpu_type={resources['gpu_type']!r} is not allowed"
+        )
 
     repo = spec["code"]["repo"]
     prefixes = policy.get("allowed_repo_prefixes", [])
     if not any(repo.startswith(prefix) for prefix in prefixes):
-        errors.append(f"code.repo={repo!r} is outside allowed_repo_prefixes={prefixes}")
+        errors.append(
+            f"code.repo={repo!r} is outside allowed_repo_prefixes={prefixes}"
+        )
 
-    run = spec["run"]
-    for pattern in policy.get("forbidden_run_patterns", []):
-        if re.search(pattern, run):
-            errors.append(f"run command matches forbidden pattern: {pattern!r}")
-
-    artifact_uri = spec["artifacts"]["uri"]
-    if "{run_id}" not in artifact_uri or "{backend_id}" not in artifact_uri:
-        errors.append("artifacts.uri must include both {run_id} and {backend_id}")
+    errors.extend(validate_runtime_placeholders(job))
+    errors.extend(
+        validate_artifact_uri(job, policy.get("allowed_artifact_uri_prefixes", []))
+    )
+    errors.extend(
+        validate_placeholders(job, set(policy.get("allowed_placeholders", [])))
+    )
+    errors.extend(
+        validate_forbidden_substrings(
+            job, policy.get("forbidden_substrings", [])
+        )
+    )
+    errors.extend(
+        validate_forbidden_regex(
+            job, policy.get("forbidden_string_regex", [])
+        )
+    )
 
     return [f"{path}: {error}" for error in errors]
 
 
+def collect_paths(include_examples: bool) -> list[pathlib.Path]:
+    paths = list(JOBS_DIR.glob("*.yaml")) + list(JOBS_DIR.glob("*.yml"))
+    if include_examples:
+        paths += list(EXAMPLES_DIR.glob("*.yaml")) + list(
+            EXAMPLES_DIR.glob("*.yml")
+        )
+    return sorted(paths)
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--include-examples",
+        action="store_true",
+        help="Also validate files under examples/ (used by CI smoke test).",
+    )
+    args = parser.parse_args()
+
     policy = load_yaml(POLICY_PATH)
     schema = load_schema(SCHEMA_PATH)
     validator = jsonschema.Draft202012Validator(schema)
 
-    job_paths = sorted(
-        list(JOBS_DIR.glob("*.yaml")) + list(JOBS_DIR.glob("*.yml"))
-    )
+    job_paths = collect_paths(include_examples=args.include_examples)
 
     errors: list[str] = []
     for path in job_paths:
         try:
             job = load_yaml(path)
-            schema_errors = sorted(validator.iter_errors(job), key=lambda e: e.path)
+            schema_errors = sorted(
+                validator.iter_errors(job), key=lambda e: list(e.path)
+            )
             for error in schema_errors:
                 loc = ".".join(str(part) for part in error.path) or "<root>"
-                errors.append(f"{path}: schema error at {loc}: {error.message}")
+                errors.append(
+                    f"{path}: schema error at {loc}: {error.message}"
+                )
             if not schema_errors:
                 errors.extend(validate_policy(path, job, policy))
         except Exception as exc:  # pylint: disable=broad-except
