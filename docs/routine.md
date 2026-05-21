@@ -1,7 +1,7 @@
 # Routine (existing intern)
 
-Day-to-day flow for submitting an experiment. Assumes onboarding
-(`docs/onboarding.md`) is done.
+Day-to-day flow for submitting an experiment. Assumes intern onboarding
+(`docs/onboarding-intern.md`) is done.
 
 About 30 seconds per submission, zero admin involvement.
 
