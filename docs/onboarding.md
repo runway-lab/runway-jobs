@@ -1,43 +1,38 @@
 # Onboarding (new intern)
 
-One-time setup. About 10 minutes. You'll do steps marked **(you)**; an
-admin handles steps marked **(admin)**.
+One-time setup. **~5 minutes once you're in the org.** Most of it is
+self-service via `rwy register`.
 
-Once finished, day-to-day usage is in `docs/routine.md`.
+Day-to-day usage is in `docs/routine.md`.
 
 ---
 
 ## 1. Accounts you need
 
-**(you)** Make sure you have a GitHub account, a [wandb](https://wandb.ai)
-account, and a [HuggingFace](https://huggingface.co) account. Use any
-username — it doesn't have to match your GitHub login.
+**(you)** Make sure you have:
+- A GitHub account (you'll need to be added to the `runway-lab` GitHub org).
+- A [wandb](https://wandb.ai) account.
+- A [HuggingFace](https://huggingface.co) account.
+
+The wandb / HF usernames don't have to match your GitHub login.
 
 ## 2. Get added to the org
 
-**(admin)** Invite you to the `runway-lab` GitHub org as a *member*
-(no repo collaborator access):
+**(admin)** invites you:
 
 ```bash
 gh api -X PUT orgs/runway-lab/memberships/<your-github-login> -f role=member
 ```
 
-**(you)** Accept the email invitation. Verify:
+Plus:
+- HF: add you to the `runway-lab` HF org as **Contributor**.
+- wandb: add you to the lab wandb team as **Member**.
 
-```bash
-gh api orgs/runway-lab/memberships/<your-github-login> --jq .state
-# → active
-```
+**(you)** Accept the GitHub email invitation.
 
-**(admin)** Also adds you to the HF `runway-lab` org as a **contributor**
-and to the lab wandb team.
+## 3. Install age
 
-## 3. Generate your age keypair (local only)
-
-`age` ([website](https://age-encryption.org)) is how we encrypt your
-secrets. You hold the only private key.
-
-**(you)** Install once:
+`age` is how we encrypt your tokens. Install once:
 
 ```bash
 # macOS
@@ -49,166 +44,164 @@ tar xzf /tmp/age.tgz -C /tmp
 mkdir -p ~/.local/bin && mv /tmp/age/age* ~/.local/bin/
 ```
 
-Generate your keypair:
+(`age-keygen` and `age` should be on `$PATH`.)
 
-```bash
-mkdir -p ~/.config/age && chmod 700 ~/.config/age
-age-keygen -o ~/.config/age/runway.key
-chmod 600 ~/.config/age/runway.key
-grep "^# public key:" ~/.config/age/runway.key | sed 's/# public key: //'
-```
-
-The last line prints your **public** key (`age1...`). Copy it.
-
-> ⚠️ **Never share** the contents of `~/.config/age/runway.key` itself.
-> Only the public key (shown by the `grep` command) goes anywhere outside
-> your machine.
-
-## 4. Register your public key
-
-**(you)** Open a PR to
-[`runway-lab/runway-secrets`](https://github.com/runway-lab/runway-secrets)
-adding a file `recipients/<your-github-login>.age.pub` containing your
-public key on one line.
-
-```bash
-git clone git@github.com:runway-lab/runway-secrets.git
-cd runway-secrets
-echo "age1..." > recipients/<your-github-login>.age.pub
-git checkout -b register-<your-github-login>
-git add recipients/<your-github-login>.age.pub
-git commit -m "Register <your-github-login>"
-git push -u origin register-<your-github-login>
-gh pr create --fill
-```
-
-**(admin)** Reviews and merges. `recipients/` is in CODEOWNERS so admin
-review is required.
-
-## 5. Generate wandb + HF tokens
-
-**(you)** Two tokens:
-
-### wandb API key
-Go to <https://wandb.ai/authorize> and copy your key.
-This is **one global key** for your account; wandb doesn't have
-fine-grained scopes.
-
-### HuggingFace fine-grained token
-1. Open <https://huggingface.co/settings/tokens/new?tokenType=fineGrained>.
-2. Name it `runway-agent-<your-github-login>`, set 90-day expiration.
-3. Under **Repositories permissions → Organizations**: add `runway-lab`
-   and tick **Read** and **Write** (only those two — not user namespace).
-4. Save the `hf_...` string.
-
-> The HF token can write to `runway-lab` org only. If it leaks, the
-> blast radius is limited to that org; your personal HF namespace stays
-> safe.
-
-## 6. Upload your encrypted secret
-
-For now, this is a one-step admin task; a `rwy register` CLI will
-self-serve it later.
-
-**(you)** Send your two tokens to the admin over a secure channel
-(Signal, encrypted email — **not** plain Slack/email/issues).
-
-**(admin)** Encrypts and PRs:
-
-```bash
-cd runway-secrets && git pull
-printf 'WANDB_API_KEY=<wandb>\nHF_TOKEN=<hf>\nHF_ORG=runway-lab\n' \
-  | age $(printf -- "-R %s " recipients/*.age.pub) \
-        -o secrets/<your-github-login>.env.enc
-git add secrets/<your-github-login>.env.enc
-git commit -m "Add secret for <your-github-login>"
-git push
-```
-
-After merge, the agent on the next poll cycle (≤ 1 minute) can decrypt
-your secret when it sees a spec with `metadata.owner: <your-github-login>`.
-
-## 7. Create your experiments repo
-
-**(you)** Make a private GitHub repo under `runway-lab` to hold your
-training code:
-
-```bash
-gh repo create runway-lab/<your-github-login>-experiments --private
-git clone git@github.com:runway-lab/<your-github-login>-experiments.git
-cd <your-github-login>-experiments
-# add your train.py, requirements.txt, etc.
-git push
-```
-
-## 8. Install the CLI
-
-**(you)** Install `rwy`:
+## 4. Install the CLI
 
 ```bash
 pip install "git+ssh://git@github.com/runway-lab/runway-tools.git#subdirectory=cli"
 ```
 
-(`runway-tools` is private — you need to be in the `runway-lab` org for
-the install to work.)
+This requires being in the `runway-lab` org (the repo is private).
 
-Sanity-check:
-
-```bash
-rwy --help
-gh auth status   # confirm you're logged in as your own GitHub account
-```
-
-## 9. Run a smoke test
-
-**(you)** Submit a tiny experiment using the example as a template.
-Copy `examples/job.yaml` from this repo and edit `metadata.owner` to
-your GitHub login and `spec.code.repo` to your experiments repo:
+## 5. Generate your keypair + register pubkey
 
 ```bash
-rwy submit my-smoke.yaml
+rwy register keygen
 ```
 
-The CLI prints a PR URL and a `run_id`. Watch:
+This:
+- Generates `~/.config/age/runway.key` (mode 600 — **keep secret**).
+- Prints your public key.
+- Opens a PR to `runway-lab/runway-secrets` adding
+  `recipients/<your-github-login>.age.pub`.
+- The repo's auto-merge gate sees the path matches your login → merges
+  within a minute or two.
 
-- The PR auto-merges (≤ 1 minute) once validation passes.
-- A tracking issue opens on this repo with title `[run] ... — <run_id>`.
-- The agent claims your spec, decrypts your secrets, clones your code,
-  runs it.
-- Your wandb dashboard shows the run live (matching `<run_id>`).
-- Your HF org shows a new repo `runway-lab/runs-<run_id>` after the
-  script finishes.
+> ⚠️ **Never share** `~/.config/age/runway.key`. Only the public key
+> (already in the PR) goes outside your machine. If you lose this file,
+> any secret encrypted to you becomes unrecoverable — re-run `rwy
+> register keygen --force` and re-upload your tokens.
 
-Use `rwy status <run_id>` to check from the command line. You're done.
+## 6. Upload your wandb key
+
+Get your wandb API key from <https://wandb.ai/authorize> then:
+
+```bash
+rwy register wandb
+# (prompts for API key, hidden input)
+```
+
+This:
+- Clones runway-secrets to a temp dir.
+- Decrypts your existing `secrets/<you>.env.enc` (if any) with your age
+  private key.
+- Adds (or updates) `WANDB_API_KEY`.
+- Re-encrypts the merged secret to every recipient in
+  `recipients/*.age.pub` (including all agent hosts).
+- PRs the new ciphertext. Auto-merges within a minute or two.
+
+You can pass `--entity <wandb-team>` if you want runs to default to a
+specific wandb team.
+
+## 7. Upload your HF token
+
+1. Create a fine-grained token at <https://huggingface.co/settings/tokens/new?tokenType=fineGrained>
+2. Name it `runway-agent-<your-github-login>`.
+3. **Repositories permissions → Organizations → `runway-lab`**: check
+   **Read** and **Write** (only those — no user-namespace access).
+4. Save the `hf_...` token.
+
+Then:
+
+```bash
+rwy register hf
+# (prompts for token, hidden input)
+```
+
+Same flow as wandb: decrypt → upsert HF_TOKEN + HF_ORG → re-encrypt → PR.
+
+## 8. Create your experiments repo
+
+```bash
+gh repo create runway-lab/<your-github-login>-experiments --private --clone
+cd <your-github-login>-experiments
+# add train.py, requirements.txt, ...
+git push
+```
+
+The CLI expects a `train.py` (or any script you point `spec.run` at) in
+this repo. See `runway-lab/jurray-experiments` for a minimal example.
+
+## 9. Smoke test
+
+```bash
+# Get the latest commit SHA of your experiments repo
+SHA=$(git -C path/to/<you>-experiments rev-parse HEAD)
+
+# Write a spec — or copy examples/job.yaml from runway-jobs and edit
+cat > /tmp/smoke.yaml <<EOF
+apiVersion: runway/v1alpha1
+kind: Experiment
+metadata: {name: hello, owner: <your-github-login>}
+spec:
+  code: {repo: runway-lab/<your-github-login>-experiments, ref: $SHA}
+  resources: {gpus: 0, gpu_type: any, max_hours: 1}
+  backends: [ssh]
+  selection: {policy: eta, profile_seconds: 0}
+  run: |
+    pip install --user -q -r requirements.txt
+    python train.py
+  artifacts: {uri: "gs://\${ARTIFACTS_BUCKET}/runs/{run_id}/candidates/{backend_id}/"}
+EOF
+
+rwy submit /tmp/smoke.yaml
+```
+
+You should see:
+- A new PR on `runway-lab/runway-jobs` auto-merging within a minute.
+- A new GitHub issue `[run] hello — <run_id>` tracking your run.
+- A wandb run appearing in your dashboard with your `run_id`.
+- A new HF repo `runway-lab/runs-<run_id>` after the script finishes.
+
+`rwy status <run_id>` gives a CLI summary.
 
 ---
 
-## What was just set up, in one picture
+## In one picture
 
 ```
-   you                 GitHub                      4vita (agent)
-   ┌──────┐            ┌──────────────┐            ┌─────────────────┐
-   │ rwy  │── PR ────▶│  runway-jobs  │── poll ──▶│  rwy-agent       │
-   │ CLI  │            │  (public)     │            │   ├ clone code   │
-   └──┬───┘            │  ├ jobs/      │            │   ├ age-decrypt  │
-      │                │  └ auto-merge│            │   │   secrets    │
-      │ git push       └──────┬───────┘            │   ├ pip install  │
-      ▼                       │ (admin: CODEOWNERS)│   └ python ...   │
-   ┌──────────────┐            │                    └────┬────────────┘
-   │ your-experi- │            ▼                          │
-   │ ments (priv) │   ┌──────────────┐                    │ env: WANDB_API_KEY, HF_TOKEN
-   └──────────────┘   │ runway-secrets│ ◀── decrypt ───── (only your.env.enc)
-                      │   (private)   │
-                      └──────────────┘
-                                                          ▼
-                                              wandb.ai/<you>/...   ─── live metrics
-                                              huggingface.co/runway-lab/runs-...
+   you (local)             GitHub (public)            agent host
+   ┌──────────┐            ┌─────────────────┐       ┌──────────────────┐
+   │ rwy      │── PR ────▶│  runway-jobs     │       │  rwy-agent       │
+   │ submit   │            │  ├ jobs/ (spec) │── poll ▶ ├ git pull       │
+   └────┬─────┘            │  └ auto-merge   │       │ ├ age decrypt   │
+        │                  └─────────────────┘       │ │   own secret  │
+        │ git push                                    │ ├ git clone code│
+        ▼                  ┌─────────────────┐       │ └ python ...    │
+   ┌──────────┐            │  runway-secrets │       │                  │
+   │ <you>-   │            │  ├ recipients/  │◀── pull (every cycle)
+   │ experi-  │            │  └ secrets/.env.enc
+   │ ments    │            │     (age, multi-recipient)
+   └──────────┘            └─────────────────┘
+                                  ▲
+                                  │ PRs from `rwy register` auto-merge
+                                  │ only if every changed file is
+                                  │ secrets/<you>.env.enc or
+                                  │ recipients/<you>.age.pub
 ```
+
+## What's protecting what (the short version)
+
+| Concern | What stops it |
+|---|---|
+| Bob reading Alice's wandb/HF tokens | age multi-recipient — Bob's private key is not in the recipient list of `secrets/alice.env.enc` |
+| Bob uploading a fake secret for Alice | runway-secrets gate workflow — PR touching `secrets/alice.env.enc` from author=bob is not auto-merged; admin review required |
+| Bob impersonating Alice in a spec submission | runway-jobs validator — rejects PRs where `metadata.owner ≠ PR author` |
+| Bob modifying or deleting Alice's existing spec | runway-jobs `check_pr_ownership.py` — rejects modify/delete of files originally authored by someone else |
+| Bob writing to Alice's HF repos | HF org Contributor role — limits write to repos you created |
+| Bob editing Alice's wandb runs | wandb team Member role — limits edit/delete to your own runs |
+
+## Looking up your stuff
+
+- Wandb dashboard: `https://wandb.ai/<your-wandb-entity>/runway-smoke`
+- HF: `https://huggingface.co/runway-lab/runs-<run_id>`
+- Recent submissions: `rwy list`
+- One run: `rwy status <run_id>`
 
 ## Where to look next
 
 - **Day-to-day workflow**: `docs/routine.md`
-- **What can / can't go in a spec**: `policies/default.yaml` (everything
-  in there is validated on every PR)
+- **What can / can't go in a spec**: `policies/default.yaml`
 - **GitHub-side setup, for admins**: `docs/github-setup.md`
 - **Architectural decisions**: `docs/discussions.md`
