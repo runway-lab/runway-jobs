@@ -1,7 +1,11 @@
-# Onboarding (new intern)
+# Intern onboarding (new researcher)
 
-One-time setup. **~5 minutes once you're in the org.** Most of it is
-self-service via `rwy register`.
+One-time setup for someone who wants to **submit jobs** via `rwy`. Takes
+~5 minutes once you're in the org. Most of it is self-service via
+`rwy register`.
+
+If you're instead bringing a new compute environment (Slurm cluster,
+SSH host, GCP project) into runway, see `docs/onboarding-agent.md`.
 
 Day-to-day usage is in `docs/routine.md`.
 
@@ -203,5 +207,6 @@ You should see:
 
 - **Day-to-day workflow**: `docs/routine.md`
 - **What can / can't go in a spec**: `policies/default.yaml`
+- **Bringing a new compute env (Slurm/SSH/GCP) in**: `docs/onboarding-agent.md`
 - **GitHub-side setup, for admins**: `docs/github-setup.md`
 - **Architectural decisions**: `docs/discussions.md`
