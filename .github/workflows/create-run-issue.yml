@@ -5,7 +5,8 @@ name: create-run-issue
 on:
   push:
     branches: [main]
-    paths: ["jobs/*.yaml"]
+  # Path filter intentionally omitted; the diff-walking step below decides
+  # whether anything in jobs/ actually changed before opening an issue.
 
 permissions:
   contents: read
