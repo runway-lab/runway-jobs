@@ -1,0 +1,37 @@
+apiVersion: runway/v1alpha1
+kind: Experiment
+metadata:
+  name: wandb-e2e-demo
+  owner: jurray-jiajun
+spec:
+  code:
+    repo: runway-lab/jurray-experiments
+    ref: e9a5baf8bad11abce43291f162351918e1a16731
+  resources:
+    gpus: 0
+    gpu_type: any
+    max_hours: 1.0
+  backends:
+  - ssh
+  selection:
+    policy: eta
+    profile_seconds: 0
+  run: 'set -e
+
+    echo "installing wandb to user site..."
+
+    python3 -m pip install --user --quiet wandb 2>&1 | tail -2 || true
+
+    export PATH="$HOME/.local/bin:$PATH"
+
+    export DEMO_STEPS=20
+
+    export DEMO_STEP_SECONDS=3
+
+    export WANDB_PROJECT=runway-smoke
+
+    python3 train.py
+
+    '
+  artifacts:
+    uri: gs://${ARTIFACTS_BUCKET}/runs/{run_id}/candidates/{backend_id}/
