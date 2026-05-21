@@ -1,0 +1,27 @@
+limits:
+  max_gpus_per_job: 4
+  max_hours: 8
+  max_profile_seconds: 900
+
+allowed_backends:
+  - gcp
+  - slurm
+  - ssh
+
+allowed_gpu_types:
+  - any
+  - A100
+  - A100-80GB
+  - H100
+  - H100-MEGA
+
+allowed_repo_prefixes:
+  - runway-lab/
+
+forbidden_run_patterns:
+  - "cat ~/.ssh"
+  - "gcloud auth"
+  - "aws configure"
+  - "printenv"
+  - "env |"
+  - "curl .*169.254.169.254"

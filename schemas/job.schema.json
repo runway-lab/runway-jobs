@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Runway Experiment",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "runway/v1alpha1"
+    },
+    "kind": {
+      "const": "Experiment"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name", "owner"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["code", "resources", "backends", "selection", "run", "artifacts"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "object",
+          "required": ["repo", "ref"],
+          "additionalProperties": false,
+          "properties": {
+            "repo": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "required": ["gpus", "gpu_type", "max_hours"],
+          "additionalProperties": false,
+          "properties": {
+            "gpus": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "gpu_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "max_hours": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "backends": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "selection": {
+          "type": "object",
+          "required": ["policy", "profile_seconds"],
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "enum": ["first_running", "eta"]
+            },
+            "profile_seconds": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "run": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifacts": {
+          "type": "object",
+          "required": ["uri"],
+          "additionalProperties": false,
+          "properties": {
+            "uri": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

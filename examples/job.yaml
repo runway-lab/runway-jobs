@@ -1,0 +1,23 @@
+apiVersion: runway/v1alpha1
+kind: Experiment
+metadata:
+  name: smoke-test
+  owner: github-user
+spec:
+  code:
+    repo: runway-lab/example-project
+    ref: main
+  resources:
+    gpus: 1
+    gpu_type: any
+    max_hours: 2
+  backends:
+    - gcp
+    - slurm
+  selection:
+    policy: eta
+    profile_seconds: 300
+  run: |
+    python train.py --config configs/smoke.yaml
+  artifacts:
+    uri: gs://replace-me/runs/{run_id}/candidates/{backend_id}/

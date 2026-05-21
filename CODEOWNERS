@@ -1,0 +1,8 @@
+# Policy and workflow changes require admin review.
+/.github/ @runway-lab/runway-admins
+/policies/ @runway-lab/runway-admins
+/schemas/ @runway-lab/runway-admins
+/scripts/ @runway-lab/runway-admins
+
+# Job submissions require reviewer/admin review.
+/jobs/ @runway-lab/runway-reviewers @runway-lab/runway-admins
