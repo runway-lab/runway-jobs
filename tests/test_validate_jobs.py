@@ -46,6 +46,7 @@ def errors_from(
     schema_validator: jsonschema.Draft202012Validator,
     policy: dict,
     job: dict,
+    pr_author: str | None = None,
 ) -> list[str]:
     """Mirror what main() does for a single in-memory job."""
     schema_errors = list(schema_validator.iter_errors(job))
@@ -56,7 +57,9 @@ def errors_from(
             + f": {e.message}"
             for e in schema_errors
         ]
-    return validate_jobs.validate_policy(FAKE_PATH, job, policy)
+    return validate_jobs.validate_policy(
+        FAKE_PATH, job, policy, pr_author=pr_author
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -300,3 +303,33 @@ def test_forbidden_regex_does_not_match_public_ip(
     # 1.1.1.1 is public — must not be flagged by the internal-IP rule.
     good_job["spec"]["run"] = "curl https://1.1.1.1/"
     assert errors_from(schema_validator, policy, good_job) == []
+
+
+# ---------------------------------------------------------------------------
+# Owner == PR author
+# ---------------------------------------------------------------------------
+
+
+def test_owner_matches_author(schema_validator, policy, good_job):
+    good_job["metadata"]["owner"] = "alice"
+    assert errors_from(
+        schema_validator, policy, good_job, pr_author="alice"
+    ) == []
+
+
+def test_owner_mismatch_rejected(schema_validator, policy, good_job):
+    good_job["metadata"]["owner"] = "alice"
+    errs = errors_from(
+        schema_validator, policy, good_job, pr_author="bob"
+    )
+    assert any(
+        "owner" in e.lower() and "alice" in e and "bob" in e for e in errs
+    ), errs
+
+
+def test_owner_check_skipped_when_no_pr_author(schema_validator, policy, good_job):
+    """Local dev runs and push-to-main: no PR author context → skip check."""
+    good_job["metadata"]["owner"] = "anyone-at-all"
+    # No pr_author passed; should still validate clean (other fields are fine).
+    assert errors_from(schema_validator, policy, good_job, pr_author=None) == []
+    assert errors_from(schema_validator, policy, good_job, pr_author="") == []

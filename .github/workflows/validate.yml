@@ -28,6 +28,11 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Validate job specs
+        env:
+          # On pull_request events, every spec in jobs/ must declare
+          # metadata.owner == the PR author. Empty for push/dispatch
+          # (where there's no PR author and the check is skipped).
+          VALIDATOR_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: python scripts/validate_jobs.py
 
       - name: Validate example
