@@ -27,6 +27,15 @@ jobs:
       - name: Run validator unit tests
         run: python -m pytest tests/ -q
 
+      - name: Enforce per-file ownership on jobs/ modifications + deletions
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LOGIN: ${{ github.event.pull_request.user.login }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: python scripts/check_pr_ownership.py
+
       - name: Validate job specs
         env:
           # Owner-vs-author check applies only to files this PR
