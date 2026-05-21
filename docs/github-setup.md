@@ -12,8 +12,11 @@ bucket names — those go through `${PLACEHOLDER}` substitution at the agent. A
 public registry is therefore safe and unlocks the GitHub-side gates below.
 
 ```bash
-gh repo edit runway-lab/runway-jobs --visibility public --accept-visibility-change-consequences
+gh api -X PATCH repos/runway-lab/runway-jobs -f visibility=public
 ```
+
+(Older `gh` versions lack `gh repo edit --visibility`'s confirmation flag; the
+API call is non-interactive and works everywhere.)
 
 ## 2. Team permissions on the repo
 
@@ -30,20 +33,30 @@ token, not collaborator permissions.
 ## 3. Branch protection on `main`
 
 ```bash
-gh api -X PUT repos/runway-lab/runway-jobs/branches/main/protection \
-  -H "Accept: application/vnd.github+json" \
-  -f required_status_checks.strict=true \
-  -f 'required_status_checks.contexts[]=schema + policy' \
-  -F enforce_admins=true \
-  -F required_pull_request_reviews.required_approving_review_count=1 \
-  -F required_pull_request_reviews.require_code_owner_reviews=true \
-  -F required_pull_request_reviews.dismiss_stale_reviews=true \
-  -F restrictions= \
-  -F required_linear_history=true \
-  -F allow_force_pushes=false \
-  -F allow_deletions=false \
-  -F required_conversation_resolution=true
+cat <<'JSON' | gh api -X PUT repos/runway-lab/runway-jobs/branches/main/protection \
+  -H "Accept: application/vnd.github+json" --input -
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["schema + policy"]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 1,
+    "require_code_owner_reviews": true,
+    "dismiss_stale_reviews": true
+  },
+  "restrictions": null,
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": true
+}
+JSON
 ```
+
+(Nested keys via `-f/-F` flat-syntax are unreliable for this endpoint; passing
+the full body as JSON is the safest form.)
 
 Settings, in plain English:
 
@@ -56,7 +69,19 @@ Settings, in plain English:
 - No force pushes, no deletions, linear history.
 - Admins are included in enforcement.
 
-## 4. (Recommended) Require signed commits
+## 4. (Optional) Require signed commits
+
+Not currently enabled. Signing adds **audit-trail integrity** (the
+`Author:` field in `git log` becomes cryptographically attested rather than
+just claimed) and gives defense-in-depth if a contributor's PAT leaks but
+their signing key does not. It is **not** load-bearing for the approval
+gate — that is already enforced by branch protection + CODEOWNERS.
+
+Cost: every contributor and every agent that writes commits must have a
+signing key set up, or pushes are rejected. (Merges via GitHub's web UI are
+auto-signed by GitHub and unaffected.)
+
+When you are ready to turn it on:
 
 ```bash
 gh api -X POST repos/runway-lab/runway-jobs/branches/main/protection/required_signatures \
