@@ -1,0 +1,25 @@
+apiVersion: runway/v1alpha1
+kind: Experiment
+metadata:
+  name: e2e-smoke-with-issue
+  owner: jurray-jiajun
+spec:
+  code:
+    repo: runway-lab/example-project
+    ref: main
+  resources:
+    gpus: 0
+    gpu_type: any
+    max_hours: 1.0
+  backends:
+  - ssh
+  selection:
+    policy: eta
+    profile_seconds: 0
+  run: "set -e\ntotal=8\necho \"round 2: should have a tracking issue this time\"\n\
+    for i in $(seq 1 $total); do\n  step=$((i * 12 + 4))\n  echo \"{\\\"step\\\":\
+    \ $step, \\\"total_steps\\\": 100, \\\"ts\\\": $(date +%s)}\"\n  sleep 5\ndone\n\
+    echo \"{\\\"step\\\": 100, \\\"total_steps\\\": 100, \\\"ts\\\": $(date +%s)}\"\
+    \necho \"complete\"\n"
+  artifacts:
+    uri: gs://${ARTIFACTS_BUCKET}/runs/{run_id}/candidates/{backend_id}/
