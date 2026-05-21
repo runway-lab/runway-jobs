@@ -2,42 +2,46 @@ name: create-run-issue
 
 # Opens a tracking issue per newly-merged job spec. Agents post their
 # live status comments into this issue (one comment per agent, edited).
+#
+# Triggered on PR close (merge) rather than push to main because pushes
+# initiated by the GITHUB_TOKEN (which is how the auto-merge workflow
+# merges PRs) do NOT trigger other workflows. pull_request_target fires
+# regardless of who/how the merge happens.
 on:
-  push:
+  pull_request_target:
+    types: [closed]
     branches: [main]
-  # Path filter intentionally omitted; the diff-walking step below decides
-  # whether anything in jobs/ actually changed before opening an issue.
 
 permissions:
   contents: read
   issues: write
+  pull-requests: read
 
 jobs:
   open-issue:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # need previous SHA to compute the diff
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
-      - name: Open issue for each new spec
+      - name: Open issue for each newly-added job spec
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
-          # github.event.before may be 0000... on a brand-new branch (won't
-          # happen for main, but be defensive).
-          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            BEFORE="${AFTER}^"
-          fi
 
-          # Find newly-added job specs in this push.
-          added=$(git diff --name-only --diff-filter=A "$BEFORE" "$AFTER" -- 'jobs/*.yaml' || true)
+          # Files added in this PR under jobs/.
+          added=$(gh api "repos/$REPO/pulls/$PR/files" \
+            --paginate \
+            --jq '.[] | select(.status == "added" and (.filename | startswith("jobs/")) and (.filename | endswith(".yaml"))) | .filename')
+
           if [ -z "$added" ]; then
-            echo "No new job specs in this push."
+            echo "No newly-added jobs/*.yaml in PR #$PR; nothing to do."
             exit 0
           fi
 
@@ -49,13 +53,13 @@ jobs:
             echo "::group::Opening issue for $run_id"
 
             python3 - "$path" "$run_id" <<'PY'
-          import json, os, pathlib, subprocess, sys
+          import os, pathlib, subprocess, sys
           import yaml
 
           path = pathlib.Path(sys.argv[1])
           run_id = sys.argv[2]
           repo = os.environ["REPO"]
-          sha = os.environ["AFTER"]
+          sha = os.environ["SHA"]
 
           spec = yaml.safe_load(path.read_text())
           md = spec["metadata"]
@@ -65,7 +69,7 @@ jobs:
 
           title = f"[run] {md['name']} by @{owner}"
           spec_url = f"https://github.com/{repo}/blob/{sha}/{path}"
-          body_lines = [
+          body = "\n".join([
               f"**Run ID:** `{run_id}`",
               f"**Owner:** @{owner}",
               f"**Spec:** [{path}]({spec_url}) (at `{sha[:8]}`)",
@@ -74,13 +78,10 @@ jobs:
               f"**Selection:** {sp['selection']['policy']} (profile {sp['selection']['profile_seconds']}s)",
               "",
               "Agents will post their live status as comments on this issue.",
-              "This issue is opened automatically by `.github/workflows/create-run-issue.yml`.",
-          ]
-          body = "\n".join(body_lines)
+              "Opened automatically by `.github/workflows/create-run-issue.yml`.",
+          ])
 
           labels = ["run", "status:running"] + [f"backend:{b}" for b in backends]
-
-          # Ensure labels exist (best-effort; ignore failures).
           for lab in labels:
               subprocess.run(
                   ["gh", "label", "create", lab, "--repo", repo, "--force"],
