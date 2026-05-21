@@ -40,7 +40,7 @@ cat <<'JSON' | gh api -X PUT repos/runway-lab/runway-jobs/branches/main/protecti
     "strict": true,
     "contexts": ["schema + policy"]
   },
-  "enforce_admins": true,
+  "enforce_admins": false,
   "required_pull_request_reviews": {
     "required_approving_review_count": 1,
     "require_code_owner_reviews": true,
@@ -60,14 +60,22 @@ the full body as JSON is the safest form.)
 
 Settings, in plain English:
 
-- Require PRs into `main` (no direct push, even admins).
+- Require PRs into `main` (no direct push).
 - Require the `schema + policy` status check (from `.github/workflows/validate.yml`).
 - Require 1 review.
 - Require CODEOWNERS to be among the reviewers (so `policies/`, `schemas/`,
   `scripts/`, `.github/` changes need an admin specifically).
 - Dismiss stale reviews on new commits.
 - No force pushes, no deletions, linear history.
-- Admins are included in enforcement.
+- `enforce_admins: false` — admins can use `gh pr merge --admin` to bypass
+  the review requirement on their own PRs. **Reason: solo admin.** GitHub
+  hard-rule forbids approving your own PR, so with a single admin in
+  `runway-admins`, `enforce_admins: true` causes operational deadlock.
+  Intern PRs (from forks) still require admin review — the bypass only
+  matters when the admin is also the PR author.
+
+> When `runway-admins` grows past one person, flip this back:
+> `gh api -X PATCH repos/runway-lab/runway-jobs/branches/main/protection/enforce_admins`.
 
 ## 4. (Optional) Require signed commits
 
