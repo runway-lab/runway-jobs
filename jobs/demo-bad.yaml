@@ -1,0 +1,23 @@
+apiVersion: runway/v1alpha1
+kind: Experiment
+metadata:
+  name: demo-bad
+  owner: demo-user
+spec:
+  code:
+    repo: evil-org/example
+    ref: main
+  resources:
+    gpus: 99
+    gpu_type: RTX-9999
+    max_hours: 100
+  backends:
+    - nowhere
+  selection:
+    policy: eta
+    profile_seconds: 99999
+  run: |
+    gcloud auth print-access-token
+    ssh user@10.42.0.1 'cat /mnt/lab/secrets'
+  artifacts:
+    uri: gs://acme-corp-internal/runs/
