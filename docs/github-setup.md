@@ -77,7 +77,33 @@ Settings, in plain English:
 > When `runway-admins` grows past one person, flip this back:
 > `gh api -X PATCH repos/runway-lab/runway-jobs/branches/main/protection/enforce_admins`.
 
-## 4. (Optional) Require signed commits
+## 4. Fork-PR workflow approval policy
+
+GitHub gates workflows from fork PRs to prevent supply-chain attacks (a
+malicious PR could modify the workflow to exfiltrate secrets). The policy
+picks who needs admin approval before the workflow runs:
+
+| `approval_policy` | Auto-run for | Requires approval |
+|---|---|---|
+| `first_time_contributors_new_to_github` | Almost everyone | Only brand-new GitHub accounts |
+| `first_time_contributors` (GitHub default) | Anyone who's had a PR merged here | Everyone else, including org members on first PR |
+| `all_external_contributors` (**what we use**) | All org members | All non-org users (random public forks) |
+
+```bash
+gh api -X PUT repos/runway-lab/runway-jobs/actions/permissions/fork-pr-contributor-approval \
+  -f approval_policy=all_external_contributors
+```
+
+So: invite interns into the `runway-lab` org (membership only — no repo
+collaborator access, they still fork+PR) and their workflows auto-run.
+Random public submitters still need an admin to click "Approve and run".
+
+> Trade-off: trust boundary moves from "merged once before" to "org
+> member". Our `validate` workflow only has `contents: read` and no
+> secrets, so the supply-chain blast radius from a compromised intern
+> account is small. Re-evaluate before any workflow gets write/secrets.
+
+## 5. (Optional) Require signed commits
 
 Not currently enabled. Signing adds **audit-trail integrity** (the
 `Author:` field in `git log` becomes cryptographically attested rather than
@@ -96,7 +122,7 @@ gh api -X POST repos/runway-lab/runway-jobs/branches/main/protection/required_si
   -H "Accept: application/vnd.github+json"
 ```
 
-## 5. Agent identity
+## 6. Agent identity
 
 Create a GitHub App `runway-agent` with the minimum scopes:
 
@@ -109,7 +135,7 @@ Create a GitHub App `runway-agent` with the minimum scopes:
 Install the App on `runway-lab/runway-jobs` only. Each agent host gets its own
 installation token; no shared PAT.
 
-## 6. Verifying the gate
+## 7. Verifying the gate
 
 After everything is applied, the following must all be true:
 
