@@ -29,11 +29,28 @@ jobs:
 
       - name: Validate job specs
         env:
-          # On pull_request events, every spec in jobs/ must declare
-          # metadata.owner == the PR author. Empty for push/dispatch
-          # (where there's no PR author and the check is skipped).
+          # On pull_request events, files this PR adds/modifies must
+          # declare metadata.owner == the PR author. Pre-existing specs
+          # on main are NOT re-checked against the current PR author
+          # (they were verified when their own PR landed).
           VALIDATOR_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-        run: python scripts/validate_jobs.py
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${PR_NUMBER:-}" ]; then
+            mapfile -t changed < <(
+              gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+                --paginate \
+                --jq '.[] | select(.status == "added" or .status == "modified") | select(.filename | startswith("jobs/")) | .filename'
+            )
+            for f in "${changed[@]}"; do
+              [ -z "$f" ] && continue
+              args+=(--pr-changed "$f")
+            done
+          fi
+          python scripts/validate_jobs.py "${args[@]}"
 
       - name: Validate example
         run: python scripts/validate_jobs.py --include-examples

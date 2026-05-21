@@ -244,9 +244,21 @@ def main() -> int:
         default=os.environ.get("VALIDATOR_PR_AUTHOR") or None,
         help=(
             "If set, every spec's metadata.owner must equal this GitHub "
-            "login. Used by CI on pull_request events to prevent submitting "
-            "a spec claiming someone else's identity. Defaults to the "
-            "VALIDATOR_PR_AUTHOR env var."
+            "login. The check applies only to paths listed in --pr-changed "
+            "(or to all spec files if --pr-changed is omitted)."
+        ),
+    )
+    parser.add_argument(
+        "--pr-changed",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "File path added or modified in the current PR. The owner-vs-"
+            "author check applies only to these paths; the rest of the "
+            "policy checks always apply to every spec in jobs/. May be "
+            "repeated; an empty list (default) means apply owner check "
+            "to every spec."
         ),
     )
     args = parser.parse_args()
@@ -256,8 +268,19 @@ def main() -> int:
     validator = jsonschema.Draft202012Validator(schema)
 
     pr_author = args.pr_author or None
+    # Resolve --pr-changed paths against the repo root so they match
+    # pathlib comparisons below.
+    pr_changed_set: set[pathlib.Path] = {
+        (ROOT / p).resolve() for p in (args.pr_changed or [])
+    }
     if pr_author:
-        print(f"Enforcing metadata.owner == {pr_author!r}")
+        if pr_changed_set:
+            print(
+                f"Enforcing metadata.owner == {pr_author!r} on "
+                f"{len(pr_changed_set)} changed file(s)"
+            )
+        else:
+            print(f"Enforcing metadata.owner == {pr_author!r} on all specs")
 
     job_paths = collect_paths(include_examples=args.include_examples)
 
@@ -274,10 +297,17 @@ def main() -> int:
                     f"{path}: schema error at {loc}: {error.message}"
                 )
             if not schema_errors:
-                # Owner-vs-author check applies only to real submissions
-                # in jobs/, not to reference files under examples/.
+                # Owner-vs-author check applies only to (a) files inside
+                # jobs/ (not examples/) AND (b) files this PR is actually
+                # adding/modifying (not pre-existing specs already on
+                # main from prior PRs).
+                in_jobs = JOBS_DIR in path.parents
+                in_change = (
+                    not pr_changed_set
+                    or path.resolve() in pr_changed_set
+                )
                 effective_pr_author = (
-                    pr_author if JOBS_DIR in path.parents else None
+                    pr_author if (in_jobs and in_change) else None
                 )
                 errors.extend(
                     validate_policy(
