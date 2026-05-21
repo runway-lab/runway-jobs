@@ -106,24 +106,38 @@ Random public submitters still need an admin to click "Approve and run".
 > secrets, so the supply-chain blast radius from a compromised intern
 > account is small. Re-evaluate before any workflow gets write/secrets.
 
-## 5. (Optional) Require signed commits
-
-Not currently enabled. Signing adds **audit-trail integrity** (the
-`Author:` field in `git log` becomes cryptographically attested rather than
-just claimed) and gives defense-in-depth if a contributor's PAT leaks but
-their signing key does not. It is **not** load-bearing for the approval
-gate — that is already enforced by branch protection + CODEOWNERS.
-
-Cost: every contributor and every agent that writes commits must have a
-signing key set up, or pushes are rejected. (Merges via GitHub's web UI are
-auto-signed by GitHub and unaffected.)
-
-When you are ready to turn it on:
+## 5. Require signed commits — **enabled**
 
 ```bash
 gh api -X POST repos/runway-lab/runway-jobs/branches/main/protection/required_signatures \
   -H "Accept: application/vnd.github+json"
+gh api -X POST repos/runway-lab/runway-secrets/branches/main/protection/required_signatures \
+  -H "Accept: application/vnd.github+json"
 ```
+
+Every commit on `main` (of either runway-jobs or runway-secrets) must be
+cryptographically signed. The `Author:` field in `git log` is then
+attested by a verified key, not just claimed.
+
+This is **zero-friction in our flow** because:
+
+- Auto-merge workflow merges via `gh pr merge --auto` (GITHUB_TOKEN) →
+  GitHub squash-merges via its API → resulting commit is signed by
+  GitHub's vigilant key.
+- `gh pr merge --admin --squash` for admin overrides → same path, also
+  signed by GitHub.
+- Interns' commits stay on their fork branches; only the squash-merged
+  result lands on `main`, and that's the only commit that has to be
+  signed.
+
+What it *does* block: someone pushing **unsigned** commits directly to
+`main` from their laptop. Branch protection already disallows direct
+push, so this is belt-and-suspenders.
+
+When a future contributor wants to push a signed commit locally (e.g.
+admins doing a complex rebase outside the auto-merge path), they need a
+GPG or SSH signing key registered on their GitHub account. See
+<https://docs.github.com/en/authentication/managing-commit-signature-verification>.
 
 ## 6. Auto-merge for `jobs/` PRs
 
