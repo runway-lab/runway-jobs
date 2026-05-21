@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import re
 import sys
@@ -128,8 +129,33 @@ def validate_runtime_placeholders(job: dict[str, Any]) -> list[str]:
     return []
 
 
+def validate_owner_matches_author(
+    job: dict[str, Any], pr_author: str | None
+) -> list[str]:
+    """In CI on a PR, spec.metadata.owner must equal the PR author.
+
+    Without this, Bob could submit a spec with ``owner: alice`` and the
+    agent — which keys secrets by owner — would inject Alice's wandb / HF
+    tokens into Bob's training script. The check is skipped (pr_author
+    falsy) for local dev runs and for push-to-main events where the
+    submitter context is no longer meaningful.
+    """
+    if not pr_author:
+        return []
+    owner = job["metadata"]["owner"]
+    if owner != pr_author:
+        return [
+            f"metadata.owner={owner!r} does not match the PR author "
+            f"({pr_author!r}); each intern must submit their own specs"
+        ]
+    return []
+
+
 def validate_policy(
-    path: pathlib.Path, job: dict[str, Any], policy: dict[str, Any]
+    path: pathlib.Path,
+    job: dict[str, Any],
+    policy: dict[str, Any],
+    pr_author: str | None = None,
 ) -> list[str]:
     errors: list[str] = []
     spec = job["spec"]
@@ -192,6 +218,7 @@ def validate_policy(
             job, policy.get("forbidden_string_regex", [])
         )
     )
+    errors.extend(validate_owner_matches_author(job, pr_author))
 
     return [f"{path}: {error}" for error in errors]
 
@@ -212,11 +239,48 @@ def main() -> int:
         action="store_true",
         help="Also validate files under examples/ (used by CI smoke test).",
     )
+    parser.add_argument(
+        "--pr-author",
+        default=os.environ.get("VALIDATOR_PR_AUTHOR") or None,
+        help=(
+            "If set, every spec's metadata.owner must equal this GitHub "
+            "login. The check applies only to paths listed in --pr-changed "
+            "(or to all spec files if --pr-changed is omitted)."
+        ),
+    )
+    parser.add_argument(
+        "--pr-changed",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "File path added or modified in the current PR. The owner-vs-"
+            "author check applies only to these paths; the rest of the "
+            "policy checks always apply to every spec in jobs/. May be "
+            "repeated; an empty list (default) means apply owner check "
+            "to every spec."
+        ),
+    )
     args = parser.parse_args()
 
     policy = load_yaml(POLICY_PATH)
     schema = load_schema(SCHEMA_PATH)
     validator = jsonschema.Draft202012Validator(schema)
+
+    pr_author = args.pr_author or None
+    # Resolve --pr-changed paths against the repo root so they match
+    # pathlib comparisons below.
+    pr_changed_set: set[pathlib.Path] = {
+        (ROOT / p).resolve() for p in (args.pr_changed or [])
+    }
+    if pr_author:
+        if pr_changed_set:
+            print(
+                f"Enforcing metadata.owner == {pr_author!r} on "
+                f"{len(pr_changed_set)} changed file(s)"
+            )
+        else:
+            print(f"Enforcing metadata.owner == {pr_author!r} on all specs")
 
     job_paths = collect_paths(include_examples=args.include_examples)
 
@@ -233,7 +297,23 @@ def main() -> int:
                     f"{path}: schema error at {loc}: {error.message}"
                 )
             if not schema_errors:
-                errors.extend(validate_policy(path, job, policy))
+                # Owner-vs-author check applies only to (a) files inside
+                # jobs/ (not examples/) AND (b) files this PR is actually
+                # adding/modifying (not pre-existing specs already on
+                # main from prior PRs).
+                in_jobs = JOBS_DIR in path.parents
+                in_change = (
+                    not pr_changed_set
+                    or path.resolve() in pr_changed_set
+                )
+                effective_pr_author = (
+                    pr_author if (in_jobs and in_change) else None
+                )
+                errors.extend(
+                    validate_policy(
+                        path, job, policy, pr_author=effective_pr_author
+                    )
+                )
         except Exception as exc:  # pylint: disable=broad-except
             errors.append(f"{path}: {exc}")
 

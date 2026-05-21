@@ -28,7 +28,35 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Validate job specs
-        run: python scripts/validate_jobs.py
+        env:
+          # Owner-vs-author check applies only to files this PR
+          # adds/modifies under jobs/. Pre-existing specs on main are
+          # NOT re-checked against the current PR author (they were
+          # verified when their own PR landed). When this PR touches no
+          # jobs/ files (e.g. docs-only), we don't pass --pr-author at
+          # all so the check is skipped entirely.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LOGIN: ${{ github.event.pull_request.user.login }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${PR_NUMBER:-}" ]; then
+            mapfile -t changed < <(
+              gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+                --paginate \
+                --jq '.[] | select(.status == "added" or .status == "modified") | select(.filename | startswith("jobs/")) | .filename'
+            )
+            # `mapfile` can yield a single empty element on no matches.
+            if [ ${#changed[@]} -gt 0 ] && [ -n "${changed[0]:-}" ]; then
+              args+=(--pr-author "$PR_LOGIN")
+              for f in "${changed[@]}"; do
+                [ -z "$f" ] && continue
+                args+=(--pr-changed "$f")
+              done
+            fi
+          fi
+          python scripts/validate_jobs.py "${args[@]}"
 
       - name: Validate example
         run: python scripts/validate_jobs.py --include-examples
