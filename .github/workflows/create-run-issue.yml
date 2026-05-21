@@ -1,0 +1,98 @@
+name: create-run-issue
+
+# Opens a tracking issue per newly-merged job spec. Agents post their
+# live status comments into this issue (one comment per agent, edited).
+on:
+  push:
+    branches: [main]
+    paths: ["jobs/**.yaml"]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  open-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # need previous SHA to compute the diff
+
+      - name: Open issue for each new spec
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # github.event.before may be 0000... on a brand-new branch (won't
+          # happen for main, but be defensive).
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            BEFORE="${AFTER}^"
+          fi
+
+          # Find newly-added job specs in this push.
+          added=$(git diff --name-only --diff-filter=A "$BEFORE" "$AFTER" -- 'jobs/*.yaml' || true)
+          if [ -z "$added" ]; then
+            echo "No new job specs in this push."
+            exit 0
+          fi
+
+          python3 -m pip install --quiet pyyaml
+
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            run_id=$(basename "$path" .yaml)
+            echo "::group::Opening issue for $run_id"
+
+            python3 - "$path" "$run_id" <<'PY'
+          import json, os, pathlib, subprocess, sys
+          import yaml
+
+          path = pathlib.Path(sys.argv[1])
+          run_id = sys.argv[2]
+          repo = os.environ["REPO"]
+          sha = os.environ["AFTER"]
+
+          spec = yaml.safe_load(path.read_text())
+          md = spec["metadata"]
+          sp = spec["spec"]
+          backends = sp["backends"]
+          owner = md["owner"]
+
+          title = f"[run] {md['name']} by @{owner}"
+          spec_url = f"https://github.com/{repo}/blob/{sha}/{path}"
+          body_lines = [
+              f"**Run ID:** `{run_id}`",
+              f"**Owner:** @{owner}",
+              f"**Spec:** [{path}]({spec_url}) (at `{sha[:8]}`)",
+              f"**Resources:** {sp['resources']['gpus']}× {sp['resources']['gpu_type']}, max {sp['resources']['max_hours']}h",
+              f"**Backends:** {', '.join(backends)}",
+              f"**Selection:** {sp['selection']['policy']} (profile {sp['selection']['profile_seconds']}s)",
+              "",
+              "Agents will post their live status as comments on this issue.",
+              "This issue is opened automatically by `.github/workflows/create-run-issue.yml`.",
+          ]
+          body = "\n".join(body_lines)
+
+          labels = ["run", "status:running"] + [f"backend:{b}" for b in backends]
+
+          # Ensure labels exist (best-effort; ignore failures).
+          for lab in labels:
+              subprocess.run(
+                  ["gh", "label", "create", lab, "--repo", repo, "--force"],
+                  capture_output=True,
+              )
+
+          subprocess.run(
+              ["gh", "issue", "create", "--repo", repo,
+               "--title", title, "--body", body,
+               "--label", ",".join(labels)],
+              check=True,
+          )
+          PY
+
+            echo "::endgroup::"
+          done <<< "$added"
