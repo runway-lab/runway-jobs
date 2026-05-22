@@ -110,6 +110,16 @@ def test_schema_rejects_nonpositive_max_hours(
     assert any("max_hours" in e or "0" in e for e in errs)
 
 
+def test_schema_rejects_zero_gpus(schema_validator, policy, good_job):
+    # gpus=0 used to be a silent footgun: the agent emitted a sbatch
+    # script with no --gres and no node count, which some sites (TACC)
+    # then rejected with a hard-to-debug stdout error. Reject at the
+    # schema layer instead so the failure shows up in `validate` CI.
+    good_job["spec"]["resources"]["gpus"] = 0
+    errs = errors_from(schema_validator, policy, good_job)
+    assert any("gpus" in e for e in errs)
+
+
 # ---------------------------------------------------------------------------
 # Policy: limits
 # ---------------------------------------------------------------------------
