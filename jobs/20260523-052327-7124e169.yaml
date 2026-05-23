@@ -1,0 +1,32 @@
+apiVersion: runway/v1alpha1
+kind: Experiment
+metadata:
+  name: slurm-smoke-v4
+  owner: zhuconv
+spec:
+  code:
+    repo: runway-lab/zhuconv-experiments
+    ref: main
+  resources:
+    gpus: 1
+    gpu_type: any
+    max_hours: 1.0
+  backends:
+  - slurm
+  selection:
+    policy: eta
+    profile_seconds: 0
+  run: 'set -e
+
+    echo "hello from slurm compute node"
+
+    hostname
+
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>&1 || echo "no
+    nvidia-smi"
+
+    echo ''{"step": 1, "total_steps": 1}''
+
+    '
+  artifacts:
+    uri: gs://${ARTIFACTS_BUCKET}/runs/{run_id}/candidates/{backend_id}/
