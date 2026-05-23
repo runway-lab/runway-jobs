@@ -316,9 +316,13 @@ comment have the diagnostic.
 
 ## Backend: GCP
 
-Not implemented yet. The interface will be the same — `rwy-agent run
---backend gcp` on a control VM with `gcloud` auth, submitting Vertex
-AI Custom Jobs. Track progress in `docs/discussions.md`.
+`GcpBackend` is not yet implemented in `runway-tools`. The design,
+operator step-by-step, predicted quirks, and Codex-on-work-laptop
+protocol are documented separately: **`docs/onboarding-gcp.md`**.
+
+Read that file before doing anything with GCP — there's a compliance
+gate (personal vs. company billing, cost ceilings, IAM scope) that
+must be resolved before infra changes.
 
 ---
 
