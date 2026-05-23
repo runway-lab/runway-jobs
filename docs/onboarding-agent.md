@@ -8,6 +8,12 @@ dedup work via a central commit-status claim lock, not via a scheduler.
 If you're an intern who just wants to submit jobs, see
 `docs/onboarding-intern.md`.
 
+> **Timestamps.** Everything in this system — run_ids, agent log lines,
+> commit status timestamps, issue comment updates — is **UTC, ISO 8601**
+> with a trailing `Z`. The only place local time shows up is your shell
+> prompt. Don't try to match `date +%Y%m%d` against a run_id near
+> midnight UTC; use `date -u +%Y%m%d` instead.
+
 ---
 
 ## The model in one paragraph
