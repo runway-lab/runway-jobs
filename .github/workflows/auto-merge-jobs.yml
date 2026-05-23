@@ -116,7 +116,9 @@ jobs:
           backends = sp["backends"]
           owner = md["owner"]
 
-          title = f"[run] {md['name']} — {run_id}"
+          # Title carries the owner so a glance at the issue list shows
+          # whose run it is without opening every issue.
+          title = f"[run] {md['name']} (@{owner}) — {run_id}"
           spec_url = f"https://github.com/{repo}/blob/{sha}/{path}"
           body = "\n".join([
               f"**Run ID:** `{run_id}`",
@@ -130,8 +132,15 @@ jobs:
               "Opened by `.github/workflows/auto-merge-jobs.yml` (open-issue job).",
           ])
 
-          labels = ["run", "status:running"] + [f"backend:{b}" for b in backends]
-          for lab in labels:
+          # The agent flips status:running → status:succeeded /
+          # status:failed at terminal state and closes the issue. Ensure
+          # all four labels exist so the PATCH on the agent side doesn't
+          # 404 on a label that hasn't been touched yet in this repo.
+          init_labels = ["run", "status:running"] + [
+              f"backend:{b}" for b in backends
+          ]
+          ensure_labels = init_labels + ["status:succeeded", "status:failed"]
+          for lab in ensure_labels:
               subprocess.run(
                   ["gh", "label", "create", lab, "--repo", repo, "--force"],
                   capture_output=True,
@@ -140,7 +149,7 @@ jobs:
           subprocess.run(
               ["gh", "issue", "create", "--repo", repo,
                "--title", title, "--body", body,
-               "--label", ",".join(labels)],
+               "--label", ",".join(init_labels)],
               check=True,
           )
           PY
