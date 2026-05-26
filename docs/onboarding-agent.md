@@ -103,7 +103,7 @@ See backend-specific sections below for the exact flags. All backends
 share these flags:
 
 ```bash
-rwy-agent run \
+rwy-agent \
   --backend <ssh|slurm|gcp> \
   --workspace ~/.rwy/work \
   --code-cache ~/.rwy/code-cache \
@@ -124,10 +124,10 @@ central claim lock uses it as the tiebreak in races). Convention:
 `rwy-agent` is a long-running process; if it dies, the cluster goes
 offline. Pick one:
 
-- `nohup rwy-agent run ... &> ~/.rwy/agent.log &` — simplest, dies on
+- `nohup rwy-agent ... &> ~/.rwy/agent.log &` — simplest, dies on
   reboot.
 - systemd user unit — survives reboot if `loginctl enable-linger` is set.
-- `tmux new-session -d -s rwy 'rwy-agent run ...'` — survives logout if
+- `tmux new-session -d -s rwy 'rwy-agent ...'` — survives logout if
   the tmux server keeps running.
 
 **Avoid `tmux` on shared head nodes** — we've seen the tmux server get
@@ -142,7 +142,7 @@ For a single GPU host (e.g. a lab workstation or a cloud VM you SSH into).
 The agent and the workload run on the same machine.
 
 ```bash
-rwy-agent run --backend ssh \
+rwy-agent --backend ssh \
   --workspace ~/.rwy/work \
   --code-cache ~/.rwy/code-cache \
   --agent-id ssh-<hostname> \
@@ -258,7 +258,7 @@ mkdir -p /scratch/$USER/rwy/{work,code-cache}
 mkdir -p ~/.rwy && ln -sf /scratch/$USER/rwy ~/.rwy/shared
 
 # Start the agent.
-nohup rwy-agent run \
+nohup rwy-agent \
   --backend slurm \
   --workspace /scratch/$USER/rwy/work \
   --code-cache /scratch/$USER/rwy/code-cache \
@@ -350,8 +350,8 @@ this new recipient.
 ```bash
 mkdir -p ~/.rwy/gcp
 
-GITHUB_TOKEN="$(gh auth token)" \
-nohup rwy-agent run \
+GITHUB_TOKEN="$(env -u GITHUB_TOKEN gh auth token)" \
+nohup rwy-agent \
   --backend gcp \
   --workspace ~/.rwy/gcp/work \
   --code-cache ~/.rwy/gcp/code-cache \
