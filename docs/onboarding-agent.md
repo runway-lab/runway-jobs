@@ -316,9 +316,98 @@ comment have the diagnostic.
 
 ## Backend: GCP
 
-Not implemented yet. The interface will be the same — `rwy-agent run
---backend gcp` on a control VM with `gcloud` auth, submitting Vertex
-AI Custom Jobs. Track progress in `docs/discussions.md`.
+The GCP backend runs from a control machine that already has working
+GCP/SkyPilot credentials. It submits each spec as a SkyPilot managed job
+(`sky jobs launch --detach-run`) and polls `sky jobs queue` / `sky jobs logs`
+until the managed job reaches a terminal state.
+
+### Prerequisites
+
+```bash
+gcloud auth list
+gcloud config get-value project
+sky check gcp
+sky jobs queue --all --output json
+```
+
+If `sky jobs queue` says the managed-jobs controller is not up yet, that is
+not fatal for onboarding; the first `sky jobs launch` will create/start it.
+Quota or permission errors must be fixed before starting the agent.
+
+Use a stable project-specific agent id and recipient name:
+
+| GCP project | Suggested agent name |
+|---|---|
+| `snap-umap-dev` | `gcp-snap-umap-dev` |
+
+Register the agent's age public key in `runway-secrets` as
+`recipients/agents/gcp-<project-id>.age.pub`, then ask existing interns to
+re-run `rwy register wandb` / `rwy register hf` so their encrypted secrets add
+this new recipient.
+
+### Launch
+
+```bash
+mkdir -p ~/.rwy/gcp
+
+GITHUB_TOKEN="$(gh auth token)" \
+nohup rwy-agent run \
+  --backend gcp \
+  --workspace ~/.rwy/gcp/work \
+  --code-cache ~/.rwy/gcp/code-cache \
+  --state-db ~/.rwy/gcp/state.db \
+  --secrets-repo ~/.runway-secrets \
+  --age-key ~/.config/age/agent.key \
+  --agent-id gcp-snap-umap-dev-1 \
+  --gcp-infra gcp/us-east5 \
+  --gcp-poll-interval 60 \
+  --interval 60 \
+  >> ~/.rwy/gcp-agent.log 2>&1 &
+```
+
+`--gcp-infra` is passed directly to SkyPilot. Use `gcp` to let SkyPilot choose
+within GCP, `gcp/<region>` to constrain region, or
+`gcp/<region>/<zone>` to constrain a zone. The agent reads
+`spec.resources.gpu_type` and `spec.resources.gpus` and passes them as
+`--gpus <gpu_type>:<count>`.
+
+Current policy caps jobs at 4 GPUs, so normal `A100`, `A100-80GB`, and `H100`
+specs can pass validation. `H100-MEGA` maps to GCP A3 Mega and is fixed at 8
+GPUs, so it will not pass until `policies/default.yaml` raises
+`max_gpus_per_job` to 8.
+
+### Smoke test
+
+Submit a very short spec with `backends: [gcp]`, a pinned code SHA, and a
+smallest-available allowed GPU shape, e.g. `resources: {gpus: 1,
+gpu_type: H100, max_hours: 1}`. The `run:` block should print one progress
+line and exit:
+
+```yaml
+apiVersion: runway/v1alpha1
+kind: Experiment
+metadata: {name: gcp-smoke, owner: <github-login>}
+spec:
+  code: {repo: runway-lab/<you>-experiments, ref: <sha>}
+  resources: {gpus: 1, gpu_type: H100, max_hours: 1}
+  backends: [gcp]
+  selection: {policy: eta, profile_seconds: 0}
+  run: |
+    set -e
+    echo "hello from gcp"
+    hostname
+    echo '{"step": 1, "total_steps": 1}'
+  artifacts: {uri: "gs://${ARTIFACTS_BUCKET}/runs/{run_id}/candidates/{backend_id}/"}
+```
+
+Expected signals:
+
+1. Tracking issue has `backend:gcp` and an `agent:gcp` live comment.
+2. Commit status `agent:gcp` moves `pending → success`.
+3. `tail -100 ~/.rwy/gcp-agent.log` shows `submitted SkyPilot managed job`.
+4. `sky jobs queue --all` shows the corresponding `rwy-<run_id>` job.
+5. The SkyPilot worker terminates after success; managed jobs clean up the
+   run cluster.
 
 ---
 

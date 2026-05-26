@@ -330,8 +330,9 @@ Real infra canaries should run in this order:
 5. Implement GitHub polling/status adapter using a GitHub App installation
    token, pulling a specific commit SHA from `main`.
 6. Implement fake backend adapter and tests.
-7. Add GCP backend using SkyPilot.
-8. Add Slurm backend using `sbatch`/`squeue`/`scancel`.
+7. ~~Add GCP backend using SkyPilot.~~ — implemented in `runway-tools` as a
+   `sky jobs launch` / `sky jobs queue` managed-jobs backend.
+8. ~~Add Slurm backend using `sbatch`/`squeue`/`scancel`.~~
 9. Add SSH backend using `nvidia-smi` polling and `flock`.
 10. Define artifact storage and run ID conventions (placeholders already in
     place: `${ARTIFACTS_BUCKET}` + `{run_id}` + `{backend_id}`).
