@@ -137,7 +137,7 @@ pkill -f 'rwy-agent.*slurm-tacc-vista-1'  # kill old instance
 sleep 2 && pgrep -af rwy-agent              # confirm dead
 
 mkdir -p ~/.rwy
-GITHUB_TOKEN="$(gh auth token)" \
+GITHUB_TOKEN="$(env -u GITHUB_TOKEN gh auth token)" \
 nohup ~/.local/bin/rwy-agent \
   --backend slurm --cluster tacc-vista \
   --workspace /scratch/11012/$USER/rwy/work \
